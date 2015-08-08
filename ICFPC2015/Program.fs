@@ -243,7 +243,7 @@ let doit argv =
     let inputData = inputFile |> Seq.map InputData.Load
 
     let fields = inputData |> Seq.map (fun i -> (mkField i, i.Units |> Seq.map readUnit)) in
-    let positions = fields |> Seq.map (fun (field, units) -> units |> Seq.collect (enumerate_all_positions field) |> Seq.maxBy field_score |> fun f -> (f, units)) in
+    let positions = fields |> Seq.map (fun (field, units) -> units |> Seq.collect (enumerate_all_positions field) |> Seq.sortBy field_score |> fun f -> (Seq.last f, units)) in
     positions |> Seq.toList
             
 [<EntryPoint>]
