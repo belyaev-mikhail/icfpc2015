@@ -25,7 +25,7 @@
     <PlatformTarget>AnyCPU</PlatformTarget>
     <DocumentationFile>bin\Debug\ICFPC2015.XML</DocumentationFile>
     <Prefer32Bit>true</Prefer32Bit>
-    <StartArguments>-t 42 -f "http://icfpcontest.org./problems/problem_23.json" -p "Hi" -p "CtulhU"</StartArguments>
+    <StartArguments>-t 1 -f "http://icfpcontest.org./problems/problem_0.json" -p "Hi" -p "CtulhU"</StartArguments>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -64,6 +64,10 @@
     <None Include="Scripts\load-project.fsx" />
   </ItemGroup>
   <ItemGroup>
+    <Reference Include="ConcurrentPriorityQueue">
+      <HintPath>..\packages\PriorityQueue.0.1.0\lib\net45\ConcurrentPriorityQueue.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
     <Reference Include="ExtCore">
       <HintPath>..\packages\ExtCore.0.8.45\lib\net45\ExtCore.dll</HintPath>
       <Private>True</Private>

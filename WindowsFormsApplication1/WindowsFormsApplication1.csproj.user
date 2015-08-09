@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|AnyCPU'">
-    <StartArguments>-t 42 -f "http://icfpcontest.org./problems/problem_23.json" -p "Hi" -p "CtulhU"</StartArguments>
+    <StartArguments>-t 1 -f "http://icfpcontest.org./problems/problem_0.json" -p "Hi" -p "CtulhU"</StartArguments>
   </PropertyGroup>
 </Project>

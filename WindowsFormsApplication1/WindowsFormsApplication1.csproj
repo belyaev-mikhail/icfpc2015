@@ -33,6 +33,10 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="ConcurrentPriorityQueue, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\PriorityQueue.0.1.0\lib\net45\ConcurrentPriorityQueue.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
     <Reference Include="ExtCore, Version=0.8.45.0, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>..\packages\ExtCore.0.8.45\lib\net45\ExtCore.dll</HintPath>
       <Private>True</Private>
