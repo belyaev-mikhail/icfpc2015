@@ -454,16 +454,19 @@ let solveAll field units =
         else
                 let s = solve field' unit in
                 match s with 
-                    | Some (pstr, unit') -> (str <- str ^ "\n" ^ pstr; field' <- apply_unit unit' field' |> Option.get)
+                    | Some (pstr, unit') -> (str <- str ^ "\n" ^ pstr; field' <- apply_unit unit' field' |> Option.map handle_lock |> Option.get)
                     | None -> stop <- true
     done;
     str
 
 let result id seed tag str = OutputData.Root(id, seed, tag, str)
 
+let now = System.DateTime.Now
+
 let mkResult (id, seed, field, units) = 
     let str = solveAll field units in
-    result id seed "Stupid bot ^__^ 3y" str
+    let tag = "Stupid bot ^___^ 5 - " + (now.Hour.ToString()) + ":" + (now.Minute.ToString()) in
+    result id seed tag str
 
 [<EntryPoint>]
 let main argv = 

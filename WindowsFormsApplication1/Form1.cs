@@ -19,7 +19,7 @@ namespace WindowsFormsApplication1
             var res = DataPart.doit(argv).First().First();
             field = res.Item3;
             unitQueue = res.Item4;
-            MessageBox.Show("" + res.Item2);
+
             //MessageBox.Show(DataPart.printField(field));
             for (var i = 0; i < field.width; ++i)
             {
@@ -61,6 +61,7 @@ namespace WindowsFormsApplication1
 
             if (aiMoves.FirstOrDefault() == null)
             {
+                //aiMoves = aiMoves.Skip(1);
                 handleLock();
             }
 
@@ -92,7 +93,11 @@ namespace WindowsFormsApplication1
 
             unit = DataPart.unit_start(unit, field);
 
-            aiMoves = DataPart.best_move(unit, field).Select(pair => pair.Item2);
+            var bm = DataPart.best_move(unit, field);
+
+            aiMoves = bm.Select(pair => pair.Item2);
+
+            //MessageBox.Show(DataPart.string_from_units(bm.Select(pair => pair.Item1)));
 
             genUnitCells();
         }
@@ -294,13 +299,20 @@ namespace WindowsFormsApplication1
             }
             else handleLock();
 
-            if(aiMoves.FirstOrDefault() == null)
+            if (aiMoves.FirstOrDefault() == null)
             {
+                //aiMoves = aiMoves.Skip(1);
                 handleLock();
             }
 
+
             genUnitCells();
             pictureBox1.Refresh();
+        }
+
+        private void Form1_Load(object sender, EventArgs e)
+        {
+
         }
     }
 }
