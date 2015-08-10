@@ -46,10 +46,17 @@ let printSeq f seq = seq |> Seq.map f
                          |> String.concat ", "
                          
 type CellState = FULL | EMPTY
-    with override s.ToString() = fmt "%A" s
 
-type Field = { width: int; height: int; data: CellState EIntMap EIntMap }
+type Field = { 
+    width: int; 
+    height: int; 
+    columns: bool array array;
+    colheights: int array;
+    rows: bool array array;
+    rowfills: int array
+}
 
+let inline bool2state b = if b then FULL else EMPTY
 
 type Hex = { x: int; y: int; z: int}
     (*  
@@ -110,6 +117,12 @@ let ( ~-. ) = reverse
 
 let origin = { x = 0; y = 0; z = 0 }
 
+let neighbourCellsHex hex = let diffs = [ { x = 1;  y = -1; z = 0 }; { x = -1; y = 1;  z = 0 }; { x = 0;  y = -1; z = 1 }; { x = -1; y = 0;  z = 1 }] 
+                            in  diffs |> Seq.map (fun diff -> translate diff hex)
+let neighbourCells unit = unit.filled |> Seq.map neighbourCellsHex
+                                      |> Seq.concat
+                                      |> HashSet.ofSeq
+
 type RotateDirection = CW | CCW
 
 let rotateHex dir pivot pt  = 
@@ -135,25 +148,50 @@ let unconcatBits (v: int64) =
     let y = (v >>> 32) &&& 0xffffffffL in
     (int32 x, int32 y)   
 
-let getCell (x: int32) (y: int32) (f: Field) = f.data 
-                                               |> EIntMap.tryFind x 
-                                               |> Option.bind (fun column -> column |> EIntMap.tryFind y)
-                                               |> Option.fill EMPTY
+let inline getCell (x: int32) (y: int32) (f: Field) = bool2state( f.columns.[x].[y] )
 
-let setCell x y st f = f.data
-                       |> EIntMap.tryFind x
-                       |> Option.fill EIntMap.Empty
-                       |> fun column -> match st with FULL -> column.Add(y, st) | EMPTY -> column.Remove(y)
-                       |> fun column -> f.data.Add(x, column)
-                       |> fun newData -> { f with data = newData }                      
+let recalcAux x y f : unit =
+    f.colheights.[x] <- f.columns.[x] 
+                        |> Array.tryFindIndex id 
+                        |> Option.map (fun h -> f.height - h)
+                        |> Option.fill 0;
+    f.rowfills.[y] <- f.rows.[y] 
+                      |> Array.countWith id
 
-let emptyField w h = { width = w; height = h; data = EIntMap.empty }
+let inline setCell x y st f :unit = 
+    let past = getCell x y f in
+    let b = (st = FULL) in 
+    let id x = x in
+    begin
+        if (past = st) then ()
+        else 
+        begin
+            f.columns.[x].[y] <- b;
+            f.rows.[y].[x] <- b;
+            recalcAux x y f
+        end        
+    end
+
+let emptyField w h =
+    let emptyColumn _ = Array.zeroCreate h in
+    let emptyRow _ = Array.zeroCreate w in
+    let ret = { 
+        width = w; 
+        height = h; 
+        columns = Array.init w emptyColumn; 
+        rows = Array.init h emptyRow;
+        colheights = Array.zeroCreate w;
+        rowfills = Array.zeroCreate h }
+    in 
+    let () = for i = 0 to w - 1 do for j = 0 to h - 1 do recalcAux i j ret done done 
+    in
+    ret
 
 let mkField (idata: InputData.Root) = 
-    let empty = ref (emptyField idata.Width idata.Height) in
+    let empty = emptyField idata.Width idata.Height in
     idata.Filled 
-    |> Seq.iter (fun (cell: InputData.Member) -> empty := setCell cell.X cell.Y FULL !empty);
-    !empty
+    |> Seq.iter (fun (cell: InputData.Member) -> setCell cell.X cell.Y FULL empty);
+    empty
 
 let printField f = 
     let builder = new StringBuilder() in
@@ -165,16 +203,36 @@ let printField f =
     done
     builder.ToString()
 
-let apply_unit {filled = filled} field =
-    let validCoords (hex: Hex) =
+let validCoords (hex: Hex) field =
         let x = hex.col in
         let y = hex.row in 
-        x >= 0 && x < field.width && y >= 0 && y < field.height in
-    let apply field hex = field |> Option.filter (fun _ -> validCoords hex) 
-                                |> Option.filter (fun f -> getCell hex.col hex.row f = EMPTY)
-                                |> Option.map (setCell hex.col hex.row FULL)
-    in
-    filled |> Seq.fold apply (Some field) 
+        x >= 0 && x < field.width && y >= 0 && y < field.height
+
+let valid_apply {filled = filled} field = 
+    let validCoords (hex: Hex) = validCoords hex field in
+    filled |> Seq.forall (fun hex -> validCoords hex && getCell hex.col hex.row field = EMPTY)
+
+let apply_unit_mut {filled = filled} field =
+    let apply field (hex: Hex) = setCell hex.col hex.row FULL field
+    in filled |> Seq.iter (apply field)
+
+type AppliedUnit = {unit: Unit; field: Field}
+    with member s.ucells = HashSet.OfSeq (s.unit.filled |> Seq.map (fun h -> (h.col, h.row)))
+         member s.getCell x y = if(s.ucells.Contains (x, y)) then FULL else getCell x y s.field
+         member s.lineFill y = let unitRows = s.unit.filled |> Seq.filter (fun h -> h.row = y) in
+                               (Seq.length unitRows + s.field.rowfills.[y])
+         member s.lineFilled y = s.lineFill y = s.field.width
+         member s.colHeight x = let unitCols = s.unit.filled |> List.filter (fun h -> h.col = x) in
+                                let unitHeight = if unitCols.IsEmpty then s.field.height else unitCols |> Seq.map (fun h -> h.row) |> Seq.min in
+                                max s.field.colheights.[x] (s.field.height - unitHeight)
+         member s.naturalColHeight x = s.field.colheights.[x] 
+         member s.naturalColFill x = s.field.columns.[x] |> Array.countWith (fun x -> x)
+         member s.colFill x = Seq.sum [ 
+                                  s.naturalColFill x;
+                                  s.unit.filled |> Seq.countWith (fun h -> int h.col = x) |> int
+                              ]
+
+let apply_unit unit field = { unit = unit; field = field }
 
 let unit_start unit field = 
     let unit_upper = unit.filled |> Seq.minBy (fun h -> h.row) in
@@ -212,42 +270,61 @@ let enumerate_all_positions field unit =
                 for rot in 0..5 do
                     let target = Hex.FromOffset(col, row) in
                     yield (unit |> translateUnit target |> rotateUnit CW rot ) }
-    |> Seq.map ^<|^ fun unit -> apply_unit unit field ^|>^ Option.map (fun f -> (f, unit))
-    |> Seq.filter Option.isSome
-    |> Seq.map Option.get 
+    |> Seq.filter (fun u -> valid_apply u field) 
+    |> Seq.map (fun unit -> (apply_unit unit field, unit))
 
 let sameType (a: 'a) (b: 'a) = a
 
-let field_score field =
-    let a = -40 in 
-    let b = 100 in
-    let c = -30 in
-    let d = -70 in
-    let e = -20 in
-    let howHigh (col: CellState EIntMap) = if col.IsEmpty then 0 else field.height - col.MinimumKey in
-    let minHeight, maxHeight = 
-                    field.data
-                    |> Seq.map (fun kv -> kv.Value |> howHigh)
-                    |> (fun h -> (Seq.min h, Seq.max h))
+let field_score (field: AppliedUnit) =
+    
+    let a = -100 in 
+    let b = 2000 in
+    let c = -100 in
+    let d = -100 in
+    let e = 0 in
+    let f = -500 in
+    let g = 100 in
+    let h = -300 in
+    let howHigh col = field.colHeight col in
+    let placeHeight = field.unit.filled |> Seq.map (fun hex -> hex.row) |> Seq.min |> fun h -> field.field.height - h in
+    let minHeight, maxHeight = [0..field.field.width-1] |> Seq.map howHigh |> (fun h -> (Seq.min h, Seq.max h))
     in 
-    let heightAdjust = if maxHeight > 3 * field.height / 4 then 3 * maxHeight else maxHeight in
-    let heightAdjust2 = if maxHeight = field.height then 1000 * heightAdjust else heightAdjust in
-    let lineComplete j = [0..field.width-1] |> Seq.forall (fun i -> getCell i j field = FULL) in
-    let completeLines = [0..field.height-1] |> Seq.countWith lineComplete |> int in
-    let bumpiness = Seq.zip [0..field.width-2] [1..field.width-1] 
+    let midHeight = [field.field.width/3..2*field.field.width/3] |> Seq.map howHigh |> Seq.max in
+    let cumHeight = (placeHeight + maxHeight)/2 in
+    let heightAdjust = if cumHeight > field.field.height/2 then 10 * cumHeight else cumHeight in
+    let heightAdjust2 = if cumHeight > field.field.height*3/4 then 5 * heightAdjust else heightAdjust in
+    let heightAdjust3 = if midHeight > field.field.height*3/4 then 100 * heightAdjust2 else heightAdjust2 in
+    let lineComplete j = field.lineFilled j in
+    let completeLines = [0..field.field.height-1] |> Seq.countWith lineComplete |> int in
+    let lineCompletion = [0..field.field.height-1] |> Seq.map (fun i -> - field.lineFill i) |> Seq.sort |> Seq.take 4 
+                        |> fun s -> 2 * Seq.head s + Seq.sum s in
+    let unitNeighbours = neighbourCells field.unit in
+    let isFull hex = validCoords hex field.field && field.getCell hex.col hex.row = FULL in
+    let isEmpty hex = validCoords hex field.field && field.getCell hex.col hex.row = EMPTY in
+    let isWindow hex = isEmpty hex && neighbourCellsHex hex |> Seq.forall (fun hex -> (not (validCoords hex field.field)) || isFull hex) in
+    let buddyFactor = unitNeighbours 
+                       |> Seq.countWith isFull 
+                       |> int in
+    let windowFactor = unitNeighbours |> Seq.countWith isWindow |> int in
+    //let () = if windowFactor <> 0 then failwith "AHA!" in
+    let bumpiness = Seq.zip [0..field.field.width-2] [1..field.field.width-1] 
                     |> Seq.map (
                         fun (x0, x1) ->
-                            let hx0 = field.data |> EIntMap.tryFind x0 |> Option.map howHigh |> Option.fill 0 in
-                            let hx1 = field.data |> EIntMap.tryFind x1 |> Option.map howHigh |> Option.fill 0 in
+                            let hx0 = howHigh x0 in
+                            let hx1 = howHigh x1 in
                             abs (hx1 - hx0) 
                        )
-                    |> Seq.max 
+                    |> Seq.sum 
     in
-    let holes = field.data 
-                |> Seq.map (fun column -> abs(howHigh (column.Value) - column.Value.Count)) 
-                |> Seq.sum
+    let holes = [0..field.field.width-1]
+                |> Seq.map (fun column -> abs(howHigh column - field.colFill column)) 
+                |> Seq.map (fun hole -> if hole > field.field.height / 4 then 1 else hole )
+                |> Seq.sum 
     in
-    (a * heightAdjust2 + b * completeLines + c * bumpiness + d * holes + e * (maxHeight - minHeight))
+    //in let () = write "(a * %d + b * %d + c * %d + d * %d + f * %d)" heightAdjust2 completeLines bumpiness holes lineCompletion in
+    (a * heightAdjust3 + b * completeLines * field.field.width 
+      + c * bumpiness + d * holes + e * (maxHeight - minHeight) + f * lineCompletion
+      + g * buddyFactor * field.field.width / 2 + h * windowFactor * field.field.width / 2)
 
 let ( |^ ) a b = fun x -> x |> a |> b
 
@@ -265,13 +342,11 @@ let handle_lock field =
     let emptyLine = [0..field.width-1] |> Seq.map(fun _ -> EMPTY) |> fun s -> new MList<CellState>(s) in
     while(lines.Count < field.height) do let _ = lines.Add(emptyLine) in () done;
     let _ = lines.Reverse() in
-    let mutable ret = { width = field.width; height = field.height; data = IntMap.Empty } in
     for j = 0 to field.height-1 do
         for i = 0 to field.width-1 do
-            ret <- setCell i j (lines.[j].[i]) ret
+            setCell i j (lines.[j].[i]) field
         done
     done
-    ret
 
 
 let local_random seed = 
@@ -299,10 +374,7 @@ let apply_move move =
         | MRotate dir -> rotateUnitOneTurn dir
         | Finished -> fun x -> x
 
-let valid field unit =
-    apply_unit unit field |> Option.isSome
-
-let valid_zipped(field, unit) = valid field unit
+let valid_zipped(field, unit) = valid_apply unit field
 
 let apply_move_zipped (move, unit) = apply_move move unit // for C#
    
@@ -316,10 +388,11 @@ let allMoves = let shifts = [E;W;SE;SW] |> Seq.map MShift in
 let distance hex0 hex1 = [abs (hex0.x - hex1.x); abs (hex0.y - hex1.y); abs (hex0.z - hex1.z)] |> Seq.max
 let rdistance unit0 unit1 = let rot = unit0.rotation - unit1.rotation in Seq.max [abs(rot); 6 - abs(rot)]
 let heuristic unit0 unit1 = rdistance unit0 unit1 + distance unit0.pivot unit1.pivot
-let neighbours unit field = allMoves |> Seq.map (fun move -> (move, apply_move move unit)) |> Seq.filter (fun (m,u) -> valid field u)
+let neighbours unit field = allMoves |> Seq.map (fun move -> (move, apply_move move unit)) |> Seq.filter (fun (m,u) -> valid_apply u field)
+
 
 let finishingMove unit field = allMoves |> Seq.map (fun move -> (apply_move move unit, move)) 
-                                        |> Seq.tryFind (fun (unit, move) -> not (valid field unit))
+                                        |> Seq.tryFind (fun (unit, move) -> not (valid_apply unit field))
                                         |> Option.map snd
 
 let canBeFinished unit field = finishingMove unit field |> Option.isSome
@@ -388,10 +461,14 @@ let enumerate_finishable field unit = let reachable = reachabilitySet unit field
                                        enumerate_all_positions field unit 
                                        |> Seq.filter (fun (_, u) -> (reachable.Contains u)) 
                                        |> Seq.filter (fun (_, unit) -> canBeFinished unit field)
+                                      
                                     
 
-let best_moves unit field = enumerate_finishable field unit 
-                         |> Seq.sortBy ( fun (field, u) -> (- field_score field + u.rotation))
+let best_moves unit field = let arr = enumerate_finishable field unit |> Seq.toArray in
+                            Array.sortInPlaceBy ( fun (field, u) -> ( - field_score field + u.rotation)) arr
+                            //write "%d" (arr.[0] |> fst |> field_score)
+                            //write "%d" (arr.[arr.Length - 1] |> fst |> field_score)
+                            arr
 
 let best_move unit field = best_moves unit field |> Seq.map (fun res -> bestFS unit (snd res) field) |> Seq.tryFind (fun lst -> lst <> []) |> Option.fill []
 
@@ -406,9 +483,8 @@ let doit argv =
     
     let inputData = inputFile |> Seq.map InputData.Load
 
-    let mkSeedData input field seed  = seq_of_units input seed |> Seq.take input.SourceLength |> fun units -> (input.Id, seed, field, units) in
-    let mkData i = let field = mkField i in
-                   i.SourceSeeds |> Seq.map (mkSeedData i field)
+    let mkSeedData input seed  = seq_of_units input seed |> Seq.take input.SourceLength |> fun units -> (input.Id, seed, mkField input, units) in
+    let mkData (i: InputData.Root) = i.SourceSeeds |> Seq.map (mkSeedData i)
     in
 
     let fields = inputData |> Seq.map mkData in
@@ -446,15 +522,18 @@ let solve field unit =
 
 
 let solveAll field units = 
-    let mutable field' = field in
     let mutable str = "" in
     let mutable stop = false in
     for unit in units do
         if stop then ()
         else
-                let s = solve field' unit in
+                let s = solve field unit in
                 match s with 
-                    | Some (pstr, unit') -> (str <- str ^ "\n" ^ pstr; field' <- apply_unit unit' field' |> Option.map handle_lock |> Option.get)
+                    | Some (pstr, unit') -> begin 
+                                                str <- str ^ "\n" ^ pstr; 
+                                                apply_unit_mut unit' field; 
+                                                handle_lock field
+                                            end
                     | None -> stop <- true
     done;
     str

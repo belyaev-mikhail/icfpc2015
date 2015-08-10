@@ -238,15 +238,15 @@ namespace WindowsFormsApplication1
 
         private void handleLock()
         {
-            var apply = DataPart.apply_unit(unit, field);
-            if(FSharpOption<DataPart.Field>.get_IsNone(apply))
+            if(!DataPart.valid_apply(unit, field))
             {
                 MessageBox.Show("You lost!");
                 updateTimer.Stop();
                 return;
             }
-            field = apply.Value;
-            field = DataPart.handle_lock(field);
+
+            DataPart.apply_unit_mut(unit, field);
+            DataPart.handle_lock(field);
             genFieldCells();
             nextUnit();
         }
@@ -286,7 +286,7 @@ namespace WindowsFormsApplication1
             }
             else if (e.KeyCode == Keys.Enter)
             {
-                updateTimer.Interval = 40;
+                updateTimer.Interval = 5;
                 updateTimer.Enabled = true;
                 updateTimer.Start();
                 return;
